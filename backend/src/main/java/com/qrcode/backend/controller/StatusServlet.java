@@ -1,4 +1,5 @@
 package com.qrcode.backend.controller;
+
 import java.io.IOException;
 
 import jakarta.servlet.ServletException;
@@ -9,14 +10,22 @@ import jakarta.servlet.http.HttpServletResponse;
 
 @WebServlet("/api/status")
 public class StatusServlet extends HttpServlet {
+
     @Override
-    protected void doGet(HttpServletRequest request, HttpServletResponse response)
-        throws ServletException, IOException{
+    protected void doGet(HttpServletRequest request,
+                         HttpServletResponse response)
+            throws ServletException, IOException {
 
         response.setContentType("application/json");
 
-        response.getWriter().write(
-                "{\"message\":\"Backend is running successsfully\"}"
+        response.setHeader(
+                "Access-Control-Allow-Origin",
+                "*"
         );
+
+        response.getWriter().write(
+                "{\"message\":\"Backend API Running Successfully\"}"
+        );
+
     }
 }

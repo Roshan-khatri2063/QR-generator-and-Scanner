@@ -1,10 +1,10 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
-import Home from "../pages/Home";
-import Login from "../pages/Login";
-import Register from "../pages/Register";
-import Scan from "../pages/Scan";
-import Generator from "../pages/Generator";
+import Home from "../pages/Home.jsx";
+import Login from "../pages/Login.jsx";
+import Register from "../pages/Register.jsx";
+import Scan from "../pages/Scan.jsx";
+import Generator from "../pages/Generator.jsx";
 
 function AppRoutes() {
     return (

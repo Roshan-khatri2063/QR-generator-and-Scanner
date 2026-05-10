@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import Layout from "../component/Layout/Layout.jsx";
+import Layout from "../component/Layout/Layout";
 import api from "../services/api.jsx";
 
 function Home() {

@@ -49,6 +49,13 @@
             <artifactId>weld-se-core</artifactId>
             <version>6.0.3.Final</version>
         </dependency>
+        <!-- BCrypt - Secure password hashing -->
+        <dependency>
+            <groupId>at.favre.lib</groupId>
+            <artifactId>bcrypt</artifactId>
+            <version>0.10.2</version>
+        </dependency>
+
         <!-- ZXing - QR Code generation and scanning -->
         <dependency>
             <groupId>com.google.zxing</groupId>

@@ -1,9 +1,11 @@
 package com.qrcode.backend.services;
 
 import com.qrcode.backend.dao.Member;
+import com.qrcode.backend.util.JwtUtil;
 import com.qrcode.backend.util.PasswordUtil;
 import com.qrcode.backend.util.ValidationUtil;
 
+import java.util.Optional;
 import java.util.logging.Logger;
 
 /**
@@ -25,19 +27,25 @@ public class AuthService {
         public final boolean success;
         public final String  message;
         public final int     userId;   // valid only on success
+        public final String  token;    // JWT — valid only on login success
 
-        private AuthResult(boolean success, String message, int userId) {
+        private AuthResult(boolean success, String message, int userId, String token) {
             this.success = success;
             this.message = message;
             this.userId  = userId;
+            this.token   = token;
         }
 
         public static AuthResult ok(String message, int userId) {
-            return new AuthResult(true, message, userId);
+            return new AuthResult(true, message, userId, null);
+        }
+
+        public static AuthResult okWithToken(String message, int userId, String token) {
+            return new AuthResult(true, message, userId, token);
         }
 
         public static AuthResult fail(String message) {
-            return new AuthResult(false, message, -1);
+            return new AuthResult(false, message, -1, null);
         }
     }
 
@@ -88,5 +96,55 @@ public class AuthService {
 
         LOGGER.info("New user registered: id=" + newId + ", username=" + username);
         return AuthResult.ok("Registration successful! Welcome, " + username + ".", newId);
+    }
+
+    // ------------------------------------------------------------------
+    // Login
+    // ------------------------------------------------------------------
+
+    /**
+     * Authenticates an existing user and returns a JWT on success.
+     *
+     * Steps:
+     *  1. Validate inputs
+     *  2. Look up user by email
+     *  3. Verify password with BCrypt
+     *  4. Generate and return a JWT
+     *
+     * @param email    the user's email address
+     * @param password the plain-text password to verify
+     * @return AuthResult with token on success, or fail with reason
+     */
+    public AuthResult login(String email, String password) {
+
+        // 1. Validate inputs
+        String validationError = ValidationUtil.validateLogin(email, password);
+        if (validationError != null) {
+            return AuthResult.fail(validationError);
+        }
+
+        // 2. Find user by email
+        Optional<Member> memberOpt = Member.findByEmail(email.trim().toLowerCase());
+        if (memberOpt.isEmpty()) {
+            // Use a generic message to avoid leaking whether the email exists
+            return AuthResult.fail("Invalid email or password.");
+        }
+
+        Member member = memberOpt.get();
+
+        // 3. Verify password
+        if (!PasswordUtil.verify(password, member.getPasswordHash())) {
+            return AuthResult.fail("Invalid email or password.");
+        }
+
+        // 4. Generate JWT
+        String token = JwtUtil.generateToken(member.getId(), member.getUsername(), member.getEmail());
+
+        LOGGER.info("User logged in: id=" + member.getId() + ", username=" + member.getUsername());
+        return AuthResult.okWithToken(
+                "Welcome back, " + member.getUsername() + "!",
+                member.getId(),
+                token
+        );
     }
 }

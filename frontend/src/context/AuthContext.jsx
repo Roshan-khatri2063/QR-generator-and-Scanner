@@ -1,45 +1,90 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
 
 /**
- * AuthContext — provides user auth state to the whole app.
+ * AuthContext — global auth state for QRHub.
+ *
+ * Day 4 additions:
+ *  - Stores JWT token in memory (never localStorage for security)
+ *  - Parses token expiry and auto-logs-out when it expires
+ *  - Exposes getToken() for use in Axios interceptor
  *
  * Exposes:
- *  - user        : { id, username, email } or null
- *  - isLoggedIn  : boolean
- *  - loginUser   : (userData) => void
- *  - logoutUser  : () => void
- *
- * JWT will be stored here in Day 4. For now we store user info in memory.
+ *  user        : { id, username, email } | null
+ *  token       : JWT string | null
+ *  isLoggedIn  : boolean
+ *  loginUser   : (userData, token) => void
+ *  logoutUser  : () => void
+ *  getToken    : () => string | null
  */
 const AuthContext = createContext(null);
 
-export function AuthProvider({ children }) {
-    const [user, setUser] = useState(null);
+/** Decode JWT payload without verifying signature (client-side only). */
+function parseJwtPayload(token) {
+    try {
+        const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+        return JSON.parse(atob(base64));
+    } catch {
+        return null;
+    }
+}
 
-    const loginUser = (userData) => {
+export function AuthProvider({ children }) {
+    const [user,  setUser]  = useState(null);
+    const [token, setToken] = useState(null);
+
+    /**
+     * Called after a successful login API response.
+     * @param {{ id, username, email }} userData
+     * @param {string} jwtToken
+     */
+    const loginUser = (userData, jwtToken) => {
         setUser(userData);
+        setToken(jwtToken);
     };
 
     const logoutUser = () => {
         setUser(null);
+        setToken(null);
     };
+
+    /** Returns the current JWT (used by Axios interceptor). */
+    const getToken = () => token;
+
+    // Auto-logout when the JWT expires
+    useEffect(() => {
+        if (!token) return;
+
+        const payload = parseJwtPayload(token);
+        if (!payload?.exp) return;
+
+        const msUntilExpiry = payload.exp * 1000 - Date.now();
+        if (msUntilExpiry <= 0) {
+            logoutUser();
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            logoutUser();
+            alert("Your session has expired. Please log in again.");
+        }, msUntilExpiry);
+
+        return () => clearTimeout(timer);
+    }, [token]);
 
     return (
         <AuthContext.Provider value={{
             user,
+            token,
             isLoggedIn: user !== null,
             loginUser,
             logoutUser,
+            getToken,
         }}>
             {children}
         </AuthContext.Provider>
     );
 }
 
-/**
- * Custom hook — use inside any component to access auth state.
- * Example: const { user, isLoggedIn, logoutUser } = useAuth();
- */
 export function useAuth() {
     const ctx = useContext(AuthContext);
     if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");

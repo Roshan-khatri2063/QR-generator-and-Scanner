@@ -1,49 +1,181 @@
 package com.qrcode.backend.services;
 
 import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
 import com.google.zxing.WriterException;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
+import com.qrcode.backend.dao.QrCodeDao;
+import com.qrcode.backend.model.QrCode;
+import com.qrcode.backend.util.QrUtils;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Base64;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Logger;
 
 /**
- * Service for QR code generation and scanning operations.
+ * Service for QR code generation, persistence, and retrieval.
+ *
+ * <p>Day 5 additions:</p>
+ * <ul>
+ *   <li>Generate and immediately save to the database</li>
+ *   <li>Retrieve a user's QR history</li>
+ *   <li>Delete a specific QR code</li>
+ *   <li>Configurable size and error-correction level</li>
+ * </ul>
  */
 public class QrService {
 
+    private static final Logger LOGGER = Logger.getLogger(QrService.class.getName());
+
     private static final int DEFAULT_WIDTH  = 300;
     private static final int DEFAULT_HEIGHT = 300;
+    private static final int MAX_WIDTH      = 1000;
+    private static final int MIN_WIDTH      = 100;
+
+    // ------------------------------------------------------------------
+    // Result wrapper
+    // ------------------------------------------------------------------
+
+    public static class QrResult {
+        public final boolean success;
+        public final String  message;
+        public final int     qrId;
+        public final String  imageBase64;
+
+        private QrResult(boolean success, String message, int qrId, String imageBase64) {
+            this.success     = success;
+            this.message     = message;
+            this.qrId        = qrId;
+            this.imageBase64 = imageBase64;
+        }
+
+        public static QrResult ok(int qrId, String imageBase64) {
+            return new QrResult(true, "QR code generated successfully.", qrId, imageBase64);
+        }
+
+        public static QrResult fail(String message) {
+            return new QrResult(false, message, -1, null);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Generate + Save
+    // ------------------------------------------------------------------
 
     /**
-     * Generates a QR code image as a Base64-encoded PNG string.
+     * Generates a QR code image and saves it to the database.
      *
-     * @param content the text/URL to encode
-     * @param width   image width in pixels
-     * @param height  image height in pixels
-     * @return Base64-encoded PNG image string
-     * @throws WriterException if QR encoding fails
-     * @throws IOException     if image writing fails
+     * @param userId  the authenticated user's ID (from JWT)
+     * @param content the text or URL to encode (must not be blank)
+     * @param width   desired image width in pixels (clamped to 100–1000)
+     * @param height  desired image height in pixels (clamped to 100–1000)
+     * @return a {@link QrResult} with the saved record ID and Base64 image
      */
-    public String generateQrCodeBase64(String content, int width, int height)
-            throws WriterException, IOException {
+    public QrResult generateAndSave(int userId, String content, int width, int height) {
 
-        QRCodeWriter writer = new QRCodeWriter();
-        BitMatrix matrix = writer.encode(content, BarcodeFormat.QR_CODE, width, height);
+        // Validate content
+        if (QrUtils.isBlank(content)) {
+            return QrResult.fail("Content cannot be empty.");
+        }
+        if (content.length() > 2000) {
+            return QrResult.fail("Content is too long (max 2000 characters).");
+        }
 
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        MatrixToImageWriter.writeToStream(matrix, "PNG", outputStream);
+        // Clamp dimensions
+        width  = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, width));
+        height = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, height));
 
-        return Base64.getEncoder().encodeToString(outputStream.toByteArray());
+        try {
+            // Generate Base64 image using ZXing
+            String imageBase64 = generateQrCodeBase64(content, width, height);
+
+            // Persist to DB
+            int savedId = QrCodeDao.save(userId, content, imageBase64);
+            if (savedId == -1) {
+                return QrResult.fail("Failed to save QR code. Please try again.");
+            }
+
+            LOGGER.info("QR code generated and saved: id=" + savedId + " userId=" + userId);
+            return QrResult.ok(savedId, imageBase64);
+
+        } catch (WriterException e) {
+            LOGGER.severe("ZXing encoding failed: " + e.getMessage());
+            return QrResult.fail("Failed to encode content into a QR code.");
+        } catch (IOException e) {
+            LOGGER.severe("Image write failed: " + e.getMessage());
+            return QrResult.fail("Failed to generate QR image.");
+        }
     }
 
     /**
-     * Generates a QR code using default 300×300 dimensions.
+     * Overload using default 300×300 dimensions.
      */
-    public String generateQrCodeBase64(String content) throws WriterException, IOException {
-        return generateQrCodeBase64(content, DEFAULT_WIDTH, DEFAULT_HEIGHT);
+    public QrResult generateAndSave(int userId, String content) {
+        return generateAndSave(userId, content, DEFAULT_WIDTH, DEFAULT_HEIGHT);
+    }
+
+    // ------------------------------------------------------------------
+    // History
+    // ------------------------------------------------------------------
+
+    /**
+     * Returns all QR codes generated by a user, newest first.
+     */
+    public List<QrCode> getHistoryForUser(int userId) {
+        return QrCodeDao.findByUserId(userId);
+    }
+
+    /**
+     * Returns the total count of QR codes for a user.
+     */
+    public int getCountForUser(int userId) {
+        return QrCodeDao.countByUserId(userId);
+    }
+
+    // ------------------------------------------------------------------
+    // Delete
+    // ------------------------------------------------------------------
+
+    /**
+     * Deletes a QR code — only succeeds if it belongs to the requesting user.
+     *
+     * @param qrId   the QR code record ID
+     * @param userId the requesting user's ID
+     * @return true if deleted, false if not found or not owned
+     */
+    public boolean delete(int qrId, int userId) {
+        return QrCodeDao.deleteByIdAndUserId(qrId, userId);
+    }
+
+    // ------------------------------------------------------------------
+    // Core ZXing generation (private)
+    // ------------------------------------------------------------------
+
+    /**
+     * Generates a QR code PNG and returns it as a Base64 string.
+     * Uses high error correction so the QR still scans if slightly damaged.
+     */
+    private String generateQrCodeBase64(String content, int width, int height)
+            throws WriterException, IOException {
+
+        Map<EncodeHintType, Object> hints = new EnumMap<>(EncodeHintType.class);
+        hints.put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.H);
+        hints.put(EncodeHintType.MARGIN, 2);
+        hints.put(EncodeHintType.CHARACTER_SET, "UTF-8");
+
+        QRCodeWriter writer = new QRCodeWriter();
+        BitMatrix matrix = writer.encode(content, BarcodeFormat.QR_CODE, width, height, hints);
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        MatrixToImageWriter.writeToStream(matrix, "PNG", out);
+
+        return Base64.getEncoder().encodeToString(out.toByteArray());
     }
 }

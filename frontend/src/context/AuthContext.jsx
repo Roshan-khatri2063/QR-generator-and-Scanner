@@ -1,4 +1,6 @@
-import { createContext, useContext, useState, useEffect } from "react";
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { setTokenGetter } from "../services/api.jsx";
 
 /**
  * AuthContext — global auth state for QRHub.
@@ -37,18 +39,24 @@ export function AuthProvider({ children }) {
      * @param {{ id, username, email }} userData
      * @param {string} jwtToken
      */
-    const loginUser = (userData, jwtToken) => {
+    const loginUser = useCallback((userData, jwtToken) => {
         setUser(userData);
         setToken(jwtToken);
-    };
+    }, []);
 
-    const logoutUser = () => {
+    const logoutUser = useCallback(() => {
         setUser(null);
         setToken(null);
-    };
+    }, []);
 
     /** Returns the current JWT (used by Axios interceptor). */
-    const getToken = () => token;
+    const getToken = useCallback(() => token, [token]);
+
+    // Make the latest token available to the Axios interceptor
+    useEffect(() => {
+        setTokenGetter(getToken);
+        return () => setTokenGetter(null);
+    }, [getToken]);
 
     // Auto-logout when the JWT expires
     useEffect(() => {
@@ -59,8 +67,10 @@ export function AuthProvider({ children }) {
 
         const msUntilExpiry = payload.exp * 1000 - Date.now();
         if (msUntilExpiry <= 0) {
-            logoutUser();
-            return;
+            const immediate = setTimeout(() => {
+                logoutUser();
+            }, 0);
+            return () => clearTimeout(immediate);
         }
 
         const timer = setTimeout(() => {
@@ -69,7 +79,7 @@ export function AuthProvider({ children }) {
         }, msUntilExpiry);
 
         return () => clearTimeout(timer);
-    }, [token]);
+    }, [token, logoutUser]);
 
     return (
         <AuthContext.Provider value={{
@@ -90,4 +100,3 @@ export function useAuth() {
     if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
     return ctx;
 }
-

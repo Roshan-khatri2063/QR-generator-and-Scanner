@@ -23,7 +23,7 @@ function Generator() {
             const response = await api.post("/api/qr/generate", { content: text });
             setQrImage(response.data.image);   // expects { image: "<base64 png>" }
         } catch (err) {
-            setError("Failed to generate QR code. Is the backend running?");
+            setError(err.friendlyMessage || "Failed to generate QR code. Is the backend running?");
             console.error(err);
         } finally {
             setLoading(false);
